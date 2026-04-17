@@ -388,25 +388,42 @@ export default function App() {
       const res=await fetch(url);
       const json=await res.json();
       if(json.status!=="ok") throw new Error("Not found");
-      const d=json.data, P=d.P, C=d.C, V=d.V, src=P||C||{};
+      const d=json.data, P=d.P, C=d.C, V=d.V;
+      // Read from both old and new column names
+      const src=C||P||{};
+      const g = (...keys) => { for(const k of keys){ const v=src[k]||""; if(v&&!(/^\d{4}-\d{2}-\d{2}T/.test(String(v)))) return String(v); } return ""; };
+
       const flagged=[];
       if(P){
-        [["IDD","IDD"],["ADHD","ADHD"],["ASD","ASD"],["SLD","SLD"],
-         ["MDD","MDD"],["ANX","Anxiety"],["ODD","ODD"],["CD","CD"]].forEach(([dom,col])=>{
-          const sev=P[`${col} Severity`]||"";
+        [["IDD","IDD Severity","P-IDD Sev"],
+         ["ADHD","ADHD Severity","P-ADHD Sev"],
+         ["ASD","ASD Severity","P-ASD Sev"],
+         ["SLD","SLD Severity","P-SLD Sev"],
+         ["MDD","MDD Severity","P-MDD Sev"],
+         ["ANX","Anxiety Severity","P-ANX Sev"],
+         ["ODD","ODD Severity","P-ODD Sev"],
+         ["CD","CD Severity","P-CD Sev"]].forEach(([dom,col1,col2])=>{
+          const sev=(P[col1]||P[col2]||"");
           if(sev&&sev!=="Normal") flagged.push(dom);
         });
       }
-      const childName=src["Child Name"]||src["Respondent Name"]||"";
-      const childDob=src["Child Date of Birth"]||dob;
-      const baseline=src["Timestamp"]||today();
+      // Child name — new format has firstName+surname, old has Child_Name or Child Name
+      const firstName = g("Child First Name","Child_Name");
+      const surname   = g("Child Surname");
+      const childName = firstName&&surname ? `${firstName} ${surname}` :
+                        firstName||surname||g("Child Name","Child_Name","Name")||"Child";
+      const childDob  = g("Date of Birth","Child_DOB","Child Date of Birth")||dob;
+      const baseline  = src["Timestamp"]||today();
       const prof={
         fileNo:fileNo.trim(), childName, childDob,
-        age:calcAge(childDob), gender:src["Child Gender"]||"",
-        school:src["School / Institution"]||"",
-        flaggedDomains:flagged, riskLevel:P?.["Risk Level"]||"",
-        treatmentPlan:V?.["Treatment Plan"]||"", baseline,
-        weekNo:calcWeekNo(baseline),
+        age:calcAge(childDob)||g("Age","Child_Age","Child Age"),
+        gender:g("Gender","Child_Gender","Child Gender"),
+        school:g("School","School / Institution"),
+        cFileNo:g("C-File No","FileNo","File No."),
+        flaggedDomains:flagged,
+        riskLevel:P?.["P-Risk Level"]||P?.["Risk Level"]||"",
+        treatmentPlan:V?.["V-Treatment Plan"]||V?.["Non-Pharmacological Plan"]||V?.["Treatment Plan"]||"",
+        baseline, weekNo:calcWeekNo(baseline),
       };
       setProfile(prof); setWeekNo(prof.weekNo);
       const url2=`${APPS_SCRIPT_URL}?action=getWeekly&reg=${encodeURIComponent(fileNo.trim())}&token=${TOKEN}`;
@@ -427,7 +444,10 @@ export default function App() {
     if(APPS_SCRIPT_URL&&profile){
       fetch(APPS_SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          tool:"WEEKLY",timestamp:new Date().toISOString(),fileNo:profile.fileNo,weekNo,lang,
+          tool:"WEEKLY",timestamp:new Date().toISOString(),
+          autoID:profile.fileNo, // fileNo is the reg ID used
+          c_file_no:profile.cFileNo||profile.fileNo,
+          fileNo:profile.fileNo,weekNo,lang,
           behaviour:responses.behaviour, school:responses.school,
           attention:responses.attention, sleep:responses.sleep,
           appetite:responses.appetite, social:responses.social,
